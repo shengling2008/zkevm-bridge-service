@@ -132,6 +132,16 @@ func (m *Manager) SendL1Deposit(ctx context.Context, tokenAddr common.Address, a
 		log.Error(2)
 		return nil
 	}
+	if tokenAddr != emptyAddr {
+		token, err := NewERC20(tokenAddr, client)
+		if err != nil {
+			return err
+		}
+		err = m.ApproveERC20(ctx, token, common.HexToAddress(l1BridgeAddr), amount)
+		if err != nil {
+			return err
+		}
+	}
 	tx, err := br.Bridge(auth, tokenAddr, amount, destNetwork, *destAddr)
 	if err != nil {
 		log.Error(3, err)
@@ -624,7 +634,13 @@ func (m *Manager) SendL2Claim(ctx context.Context, deposit *pb.Deposit, smtProof
 	// wait matic transfer to be mined
 	log.Infof("Waiting tx to be mined")
 	const txTimeout = 15 * time.Second
-	_, err = m.WaitTxToBeMined(ctx, client, tx.Hash(), txTimeout)
+	txHash := tx.Hash()
+	log.Debugf("Tx Hash : %s", txHash)
+	txStatus, _, err := client.TransactionByHash(ctx, txHash)
+	log.Debugf("%+v, %s", txStatus, err)
+	receipt, err := client.TransactionReceipt(ctx, txHash)
+	log.Debugf("%+v, %s", receipt, err)
+	_, err = m.WaitTxToBeMined(ctx, client, txHash, txTimeout)
 
 	//Wait for the consolidation
 	time.Sleep(30 * time.Second)
@@ -720,4 +736,48 @@ func (m *Manager) ForceBatchProposal(ctx context.Context) error {
 	}
 	// time.Sleep(30 * time.Second)
 	return nil
+}
+
+func (m *Manager) DeployERC20(ctx context.Context, name, symbol string) (common.Address, *ERC20, error) {
+	client, auth, _, err := initClientConnection(ctx, "l1")
+	if err != nil {
+		return common.Address{}, nil, err
+	}
+	log.Debugf("Deploying ERC20 Token: [%v]%v", symbol, name)
+	const txMinedTimeoutLimit = 20 * time.Second
+	addr, tx, instance, err := DeployERC20(auth, client, name, symbol)
+	if err != nil {
+		return common.Address{}, nil, err
+	}
+	_, err = m.WaitTxToBeMined(ctx, client, tx.Hash(), txMinedTimeoutLimit)
+
+	return addr, instance, err
+}
+
+func (m *Manager) MintERC20(ctx context.Context, erc20sc *ERC20, amount *big.Int) (*types.Transaction, error) {
+	client, auth, _, err := initClientConnection(ctx, "l1")
+	if err != nil {
+		return nil, err
+	}
+	tx, err := erc20sc.Mint(auth, amount)
+	if err != nil {
+		return nil, err
+	}
+	const txMinedTimeoutLimit = 20 * time.Second
+	_, err = m.WaitTxToBeMined(ctx, client, tx.Hash(), txMinedTimeoutLimit)
+	return tx, err
+}
+
+func (m *Manager) ApproveERC20(ctx context.Context, erc20sc *ERC20, routerAddr common.Address, amount *big.Int) error {
+	client, auth, _, err := initClientConnection(ctx, "l1")
+	if err != nil {
+		return err
+	}
+	tx, err := erc20sc.Approve(auth, routerAddr, amount)
+	if err != nil {
+		return err
+	}
+	const txMinedTimeoutLimit = 20 * time.Second
+	_, err = m.WaitTxToBeMined(ctx, client, tx.Hash(), txMinedTimeoutLimit)
+	return err
 }
