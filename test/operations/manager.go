@@ -2,6 +2,7 @@ package operations
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -44,7 +45,7 @@ const (
 	l1AccHexAddress    = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 	l1AccHexPrivateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
-	l2AccHexPrivateKey = "0xdfd01798f92667dbf91df722434e8fbe96af0211d4d1b82bbbbc8f1def7a814f"
+	l2AccHexPrivateKey = "0xdfd01798f92667dbf91df722434e8fbe96af0211d4d1b82bbbbc8f1def7a814f" //0xc949254d682d8c9ad5682521675b8f43b102aec4
 
 	sequencerAddress = "0x617b3a3528F9cDd6630fd3301B9c8911F7Bf063D"
 
@@ -449,7 +450,7 @@ func (m *Manager) WaitTxToBeMined(ctx context.Context, client *ethclient.Client,
 			}
 
 			if r.Status == types.ReceiptStatusFailed {
-				return nil, fmt.Errorf("transaction has failed: %s", string(r.PostState))
+				return nil, fmt.Errorf("transaction has failed. Root: %s", hex.EncodeToString(r.PostState))
 			}
 
 			return r, nil
@@ -632,6 +633,7 @@ func (m *Manager) SendL2Claim(ctx context.Context, deposit *pb.Deposit, smtProof
 	}
 
 	// wait matic transfer to be mined
+	time.Sleep(15 * time.Second)
 	log.Infof("Waiting tx to be mined")
 	const txTimeout = 15 * time.Second
 	txHash := tx.Hash()
@@ -641,10 +643,12 @@ func (m *Manager) SendL2Claim(ctx context.Context, deposit *pb.Deposit, smtProof
 	receipt, err := client.TransactionReceipt(ctx, txHash)
 	log.Debugf("%+v, %s", receipt, err)
 	_, err = m.WaitTxToBeMined(ctx, client, txHash, txTimeout)
-
+	if err != nil {
+		return err
+	}
 	//Wait for the consolidation
 	time.Sleep(30 * time.Second)
-	return err
+	return nil
 
 }
 
@@ -734,7 +738,7 @@ func (m *Manager) ForceBatchProposal(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// time.Sleep(30 * time.Second)
+	time.Sleep(45 * time.Second)
 	return nil
 }
 
