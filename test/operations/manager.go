@@ -785,3 +785,7 @@ func (m *Manager) ApproveERC20(ctx context.Context, erc20sc *ERC20, routerAddr c
 	_, err = m.WaitTxToBeMined(ctx, client, tx.Hash(), txMinedTimeoutLimit)
 	return err
 }
+
+func (m *Manager) GetTokenWrapped(ctx context.Context, originNetwork uint, originalTokenAddr common.Address) (*etherman.TokenWrapped, error) {
+	return m.storage.GetTokenWrapped(ctx, originNetwork, originalTokenAddr)
+}

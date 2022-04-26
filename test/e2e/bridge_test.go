@@ -91,13 +91,8 @@ func TestE2E(t *testing.T) {
 			// Get Bridge Info By DestAddr
 			deposits, err := opsman.GetBridgeInfoByDestAddr(ctx, &destAddr)
 			require.NoError(t, err)
-			// Check L2 funds
-
-			balance, err = opsman.CheckAccountTokenBalance(ctx, "l2", tokenAddr, &destAddr)
-			require.NoError(t, err)
-			initL2Balance := big.NewInt(0)
-			assert.Equal(t, 0, balance.Cmp(initL2Balance))
-			t.Log(deposits)
+			
+			t.Log("Deposits: ", deposits)
 			t.Log("Before getClaimData: ", deposits[0].NetworkId, deposits[0].DepositCnt)
 			// Get the claim data
 			smtProof, globaExitRoot, err := opsman.GetClaimData(uint(deposits[0].NetworkId), uint(deposits[0].DepositCnt))
@@ -113,13 +108,14 @@ func TestE2E(t *testing.T) {
 			// Claim funds in L1
 			err = opsman.SendL2Claim(ctx, deposits[0], smtProof, globaExitRoot)
 			t.Log("Error claiming l2 funds: ", err)
-			panic("Test Breakpoint")
-			// require.NoError(t, err)
+			require.NoError(t, err)
+			tokenWrapped, err := opsman.GetTokenWrapped(ctx, 0, tokenAddr)
+			require.NoError(t, err)
+			t.Log("TokenWrapped: ", tokenWrapped)
 			// Check L2 funds to see if the amount has been increased
-
-			balance2, err := opsman.CheckAccountBalance(ctx, "l2", &destAddr)
-			// require.NoError(t, err)
-			assert.NotEqual(t, balance, balance2)
+			balance2, err := opsman.CheckAccountTokenBalance(ctx, "l2", tokenWrapped.WrappedTokenAddress, &destAddr)
+			require.NoError(t, err)
+			t.Log("Blance tokenWrapped: ", balance2)
 			assert.Equal(t, amount, balance2)
 
 			// Check globalExitRoot
