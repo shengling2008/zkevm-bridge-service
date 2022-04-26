@@ -118,7 +118,6 @@ func (m *Manager) SendL1Deposit(ctx context.Context, tokenAddr common.Address, a
 ) error {
 	client, auth, _, err := initClientConnection(ctx, "l1")
 	if err != nil {
-		log.Error(1)
 		return err
 	}
 	emptyAddr := common.Address{}
@@ -130,30 +129,31 @@ func (m *Manager) SendL1Deposit(ctx context.Context, tokenAddr common.Address, a
 	}
 	br, err := bridge.NewBridge(common.HexToAddress(l1BridgeAddr), client)
 	if err != nil {
-		log.Error(2)
 		return nil
 	}
 	if tokenAddr != emptyAddr {
+		log.Debug("Sending funds to l1 account")
 		token, err := NewERC20(tokenAddr, client)
 		if err != nil {
 			return err
 		}
-		err = m.ApproveERC20(ctx, token, common.HexToAddress(l1BridgeAddr), amount)
+		log.Debug("Approving tokens...")
+		err = m.ApproveERC20(ctx, token, common.HexToAddress(l1BridgeAddr), amount, "l1")
 		if err != nil {
 			return err
 		}
 	}
 	tx, err := br.Bridge(auth, tokenAddr, amount, destNetwork, *destAddr)
 	if err != nil {
-		log.Error(3, err)
 		return err
 	}
 
 	// wait matic transfer to be mined
 	log.Infof("Waiting L1Deposit to be mined")
-	const txTimeout = 15 * time.Second
+	const txTimeout = 45 * time.Second
 	_, err = m.WaitTxToBeMined(ctx, client, tx.Hash(), txTimeout)
 	if err != nil {
+		log.Error("Timeout. txHash: ", tx.Hash().String())
 		return err
 	}
 	//Wait to process tx and sync it
@@ -172,6 +172,7 @@ func (m *Manager) SendL2Deposit(ctx context.Context, tokenAddr common.Address, a
 
 	// TODO Remove gas hardcoded when gas estimatios is fixed
 	auth.GasLimit = 234480
+	auth.GasPrice = big.NewInt(0)
 
 	emptyAddr := common.Address{}
 	if tokenAddr == emptyAddr {
@@ -708,10 +709,6 @@ func (m *Manager) ForceBatchProposal(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// callData, err := hex.DecodeString("00")
-	// if err != nil {
-	// 	return err
-	// }
 	matic, err := erc20.NewMatic(common.HexToAddress(MaticTokenAddress), client)
 	if err != nil {
 		return err
@@ -726,7 +723,6 @@ func (m *Manager) ForceBatchProposal(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// time.Sleep(30 * time.Second)
 	tx, err := poe.SendBatch(auth, []byte{}, maticAmount)
 	if err != nil {
 		return err
@@ -743,11 +739,11 @@ func (m *Manager) ForceBatchProposal(ctx context.Context) error {
 }
 
 func (m *Manager) DeployERC20(ctx context.Context, name, symbol string) (common.Address, *ERC20, error) {
-	client, auth, _, err := initClientConnection(ctx, "l1")
+	client, _, auth, err := initClientConnection(ctx, "l2")
 	if err != nil {
 		return common.Address{}, nil, err
 	}
-	log.Debugf("Deploying ERC20 Token: [%v]%v", symbol, name)
+	auth.GasPrice = big.NewInt(0)
 	const txMinedTimeoutLimit = 20 * time.Second
 	addr, tx, instance, err := DeployERC20(auth, client, name, symbol)
 	if err != nil {
@@ -758,10 +754,14 @@ func (m *Manager) DeployERC20(ctx context.Context, name, symbol string) (common.
 	return addr, instance, err
 }
 
-func (m *Manager) MintERC20(ctx context.Context, erc20sc *ERC20, amount *big.Int) (*types.Transaction, error) {
-	client, auth, _, err := initClientConnection(ctx, "l1")
+func (m *Manager) MintERC20(ctx context.Context, erc20sc *ERC20, amount *big.Int, network string) (*types.Transaction, error) {
+	client, auth, auth2, err := initClientConnection(ctx, network)
 	if err != nil {
 		return nil, err
+	}
+	if network == "l2" {
+		auth = auth2
+		auth.GasPrice = big.NewInt(0)
 	}
 	tx, err := erc20sc.Mint(auth, amount)
 	if err != nil {
@@ -769,13 +769,24 @@ func (m *Manager) MintERC20(ctx context.Context, erc20sc *ERC20, amount *big.Int
 	}
 	const txMinedTimeoutLimit = 20 * time.Second
 	_, err = m.WaitTxToBeMined(ctx, client, tx.Hash(), txMinedTimeoutLimit)
+
+	err = m.ApproveERC20(ctx, erc20sc, common.HexToAddress(l2BridgeAddr), amount, network)
+	if err != nil {
+		return nil, err
+	}
+	time.Sleep(30 * time.Second)
+	
 	return tx, err
 }
 
-func (m *Manager) ApproveERC20(ctx context.Context, erc20sc *ERC20, routerAddr common.Address, amount *big.Int) error {
-	client, auth, _, err := initClientConnection(ctx, "l1")
+func (m *Manager) ApproveERC20(ctx context.Context, erc20sc *ERC20, routerAddr common.Address, amount *big.Int, network string) error {
+	client, auth, auth2, err := initClientConnection(ctx, network)
 	if err != nil {
 		return err
+	}
+	if network == "l2" {
+		auth = auth2
+		auth.GasPrice = big.NewInt(0)
 	}
 	tx, err := erc20sc.Approve(auth, routerAddr, amount)
 	if err != nil {
@@ -784,4 +795,8 @@ func (m *Manager) ApproveERC20(ctx context.Context, erc20sc *ERC20, routerAddr c
 	const txMinedTimeoutLimit = 20 * time.Second
 	_, err = m.WaitTxToBeMined(ctx, client, tx.Hash(), txMinedTimeoutLimit)
 	return err
+}
+
+func (m *Manager) GetTokenWrapped(ctx context.Context, originNetwork uint, originalTokenAddr common.Address) (*etherman.TokenWrapped, error) {
+	return m.storage.GetTokenWrapped(ctx, originNetwork, originalTokenAddr)
 }
